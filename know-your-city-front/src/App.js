@@ -1,36 +1,57 @@
 import React, { useState, useEffect } from 'react';
-import { getStatus } from './services/api';
+import { getCities } from './services/api';
 
 function App() {
-  const [data, setData] = useState(null);
+  const [cities, setCities] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // This runs automatically when the page loads
   useEffect(() => {
-    getStatus()
-      .then(response => setData(response))
-      .catch(err => setError("Failed to connect to backend"));
+    getCities()
+      .then(data => {
+        setCities(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError("Failed to fetch cities");
+        setLoading(false);
+      });
   }, []);
 
   return (
-    <div style={{ textAlign: 'center', marginTop: '50px', fontFamily: 'Arial' }}>
-      <h1>City App Connection Test</h1>
+    <div style={{ padding: '40px', fontFamily: 'Arial', textAlign: 'center' }}>
+      <h1>🌍 Know Your City</h1>
       
-      {/* State: Loading */}
-      {!data && !error && <p>Trying to reach Flask...</p>}
+      {/* Loading State */}
+      {loading && <p>Loading cities from Supabase...</p>}
 
-      {/* State: Error */}
+      {/* Error State */}
       {error && <p style={{ color: 'red' }}>{error}</p>}
 
-      {/* State: Success */}
-      {data && (
-        <div style={{ padding: '20px', border: '2px solid green', display: 'inline-block', borderRadius: '10px' }}>
-          <h2 style={{ color: 'green' }}>✓ Connected!</h2>
-          <p><strong>Status:</strong> {data.status}</p>
-          <p><strong>Message:</strong> {data.message}</p>
-          <p><strong>Payload:</strong> {data.payload}</p>
-        </div>
+      {/* Empty State */}
+      {!loading && !error && cities.length === 0 && (
+        <p>No cities found in the database.</p>
       )}
+
+      {/* Data List */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '20px' }}>
+        {cities.map((city) => (
+          <div 
+            key={city.id} 
+            style={{
+              border: '1px solid #ddd',
+              borderRadius: '8px',
+              padding: '20px',
+              width: '200px',
+              boxShadow: '0 2px 5px rgba(0,0,0,0.1)'
+            }}
+          >
+            {/* Adjust these keys (name, country) to match your actual Supabase columns */}
+            <h3>{city.name}</h3> 
+            <p style={{ color: '#666' }}>{city.country || 'Unknown Location'}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
