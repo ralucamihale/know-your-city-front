@@ -1,38 +1,54 @@
+/* Asigură-te că elementele de bază ocupă tot ecranul */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* Previne scroll-ul dublu */
+}
+
 .App {
+  font-family: Arial, sans-serif;
   text-align: center;
-}
-
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
-}
-
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
+  /* Flexbox pentru layout vertical */
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
+  height: 100vh; /* 100% din înălțimea vizibilă (viewport height) */
+}
+
+.app-header {
+  background-color: #282c34;
+  padding: 15px 20px;
   color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0; /* Header-ul nu se micșorează */
+  z-index: 10;
 }
 
-.App-link {
-  color: #61dafb;
+.status-indicator {
+  font-size: 0.9rem;
+  font-weight: bold;
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+/* Secțiunea hărții va crește (grow) să ocupe tot spațiul rămas */
+.map-section {
+  flex: 1; 
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Containerul hărții preia înălțimea părintelui (.map-section) */
+.map-container {
+  height: 100%;
+  width: 100%;
+}
+
+.debug-info {
+  background: #f0f0f0;
+  padding: 5px;
+  border-top: 1px solid #ccc;
+  font-size: 0.8rem;
+  flex-shrink: 0; /* Nici bara de debug nu se micșorează */
 }

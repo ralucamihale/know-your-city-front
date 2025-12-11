@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { getStatus } from './services/api';
+import MapComponent from './MapComponent';
+import './App.css';
 
 function App() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
-  // This runs automatically when the page loads
   useEffect(() => {
     getStatus()
       .then(response => setData(response))
@@ -13,22 +14,24 @@ function App() {
   }, []);
 
   return (
-    <div style={{ textAlign: 'center', marginTop: '50px', fontFamily: 'Arial' }}>
-      <h1>City App Connection Test</h1>
+    <div className="App">
+      <header className="app-header">
+        <h2>KnowYourCity</h2>
+        <div className="status-indicator">
+          {!data && !error && <span style={{color: 'orange'}}>Conectare...</span>}
+          {error && <span style={{color: '#ff6b6b'}}>Offline</span>}
+          {data && <span style={{color: '#4caf50'}}>Online</span>}
+        </div>
+      </header>
+
+      <main className="map-section">
+        <MapComponent />
+      </main>
       
-      {/* State: Loading */}
-      {!data && !error && <p>Trying to reach Flask...</p>}
-
-      {/* State: Error */}
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-
-      {/* State: Success */}
+      {/* Mesajul de debug jos, opțional */}
       {data && (
-        <div style={{ padding: '20px', border: '2px solid green', display: 'inline-block', borderRadius: '10px' }}>
-          <h2 style={{ color: 'green' }}>✓ Connected!</h2>
-          <p><strong>Status:</strong> {data.status}</p>
-          <p><strong>Message:</strong> {data.message}</p>
-          <p><strong>Payload:</strong> {data.payload}</p>
+        <div className="debug-info">
+           Mesaj server: {data.message}
         </div>
       )}
     </div>
