@@ -1,14 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import Graphic from "@arcgis/core/Graphic";
 import Login from './Login';
 import Register from './Register';
+import Menu from './Menu'; // Ensure this matches your file name
 import './App.css';
 
-// --- STILURI CSS IN-LINE PENTRU SIMPLITATE ---
+// --- STYLES ---
 const styles = {
     notification: {
         position: 'absolute',
@@ -23,76 +24,47 @@ const styles = {
         fontSize: '16px',
         fontWeight: '500',
         boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
-        pointerEvents: 'none', // Să poți da click prin el pe hartă
+        pointerEvents: 'none',
         transition: 'opacity 0.3s ease-in-out',
     },
-    btnContainer: {
+    backBtn: {
         position: 'absolute',
-        bottom: '30px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 80,
-        display: 'flex',
-        gap: '10px'
-    },
-    mainBtn: {
-        padding: '15px 30px',
-        fontSize: '18px',
-        fontWeight: 'bold',
-        backgroundColor: '#e38b4f',
-        color: 'white',
-        border: 'none',
-        borderRadius: '30px',
-        boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
-        cursor: 'pointer'
-    },
-    resetBtn: {
+        top: '20px',
+        left: '20px',
+        zIndex: 90,
         padding: '10px 20px',
-        fontSize: '14px',
-        fontWeight: 'bold',
-        backgroundColor: '#333',
+        background: '#333',
         color: 'white',
         border: 'none',
-        borderRadius: '20px',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
-        cursor: 'pointer'
+        borderRadius: '5px',
+        cursor: 'pointer',
+        fontWeight: 'bold'
     }
 };
 
 function GameMap() {
   const mapDiv = useRef(null);
-  
-  // Refs pentru acces instant în evenimente
   const viewRef = useRef(null);
   const gridLayerRef = useRef(null);
   const userLayerRef = useRef(null);
   const gridMetadataRef = useRef(null);
 
-  const [notification, setNotification] = useState(null); // Mesajul de pe ecran
-  const [hasGrid, setHasGrid] = useState(false);
-  const [loading, setLoading] = useState(false);
-
+  const { gridId } = useParams(); // <--- GET ID FROM URL
+  const [notification, setNotification] = useState(null);
   const userId = localStorage.getItem('user_id'); 
   const navigate = useNavigate();
 
   useEffect(() => {
       if (!userId) {
-          showMessage("Trebuie să te autentifici!", "error");
           navigate('/');
       }
   }, [userId, navigate]);
 
-  // --- 1. SISTEM DE MESAJE (TOAST) ---
-  const showMessage = (msg, type = "info") => {
-      // Putem schimba culoarea în funcție de tip (opțional)
+  const showMessage = (msg) => {
       setNotification(msg);
-      // Mesajul dispare singur după 3 secunde
-      setTimeout(() => {
-          setNotification(null);
-      }, 3000);
+      setTimeout(() => setNotification(null), 3000);
   };
 
-  // --- FUNCTII AUXILIARE ---
   const createCellGraphic = (row, col, centerLat, centerLng, cellSize) => {
     const metersPerLat = 111320;
     const metersPerLng = 40075000 * Math.cos(centerLat * Math.PI / 180) / 360;
@@ -160,19 +132,23 @@ function GameMap() {
     gridLayerRef.current.add(outlineGraphic);
   };
 
-  // --- LOGICA DE EXPLORARE ---
   const explorePosition = async (lat, lng) => {
       try {
+          // --- CHANGED: Send grid_id so backend knows which grid to update ---
           const res = await fetch('http://127.0.0.1:5000/api/explore', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ lat, lng, user_id: userId })
+              body: JSON.stringify({ 
+                  lat, 
+                  lng, 
+                  user_id: userId,
+                  grid_id: gridId // <--- CRITICAL UPDATE
+              })
           });
           const data = await res.json();
           
           if(data.status === 'unlocked') {
               if (gridMetadataRef.current && gridLayerRef.current) {
-                  // Afișăm mesaj pe ecran
                   showMessage(`🎉 Zonă nouă descoperită! (${data.row}, ${data.col})`);
                   
                   const newGraphic = createCellGraphic(
@@ -184,9 +160,6 @@ function GameMap() {
                   );
                   gridLayerRef.current.add(newGraphic);
               }
-          } else if (data.status === 'already_visited') {
-              // Opțional: Poți scoate linia asta dacă te enervează mesajele prea dese
-              // showMessage("Deja vizitat...");
           }
       } catch (e) {
           console.log("Eroare explorare", e);
@@ -195,11 +168,13 @@ function GameMap() {
 
   const loadUserGrid = async () => {
       try {
-          const res = await fetch(`http://127.0.0.1:5000/api/grid_by_user/${userId}`);
+          // --- CHANGED: Fetch specific grid data using URL param ---
+          const res = await fetch(`http://127.0.0.1:5000/api/grid_data/${gridId}`);
+          if (!res.ok) throw new Error("Grid not found");
+
           const data = await res.json();
           
           if(data.has_grid && gridLayerRef.current) {
-              setHasGrid(true);
               
               gridMetadataRef.current = {
                   centerLat: data.center_lat,
@@ -210,17 +185,12 @@ function GameMap() {
 
               gridLayerRef.current.removeAll(); 
               
-              // --- FIX: Așteptăm ca view-ul să fie gata înainte de goTo ---
               if(viewRef.current) {
                   viewRef.current.when(() => {
                       viewRef.current.goTo({ center: [data.center_lng, data.center_lat], zoom: 15 })
-                        .catch(err => {
-                             // Ignorăm erorile de întrerupere a animației
-                             if (err.name !== "AbortError") console.log(err);
-                        });
+                        .catch(err => { if (err.name !== "AbortError") console.log(err); });
                   });
               }
-              // -----------------------------------------------------------
 
               drawGridOutline(data.center_lat, data.center_lng, data.dimension, data.cell_size);
 
@@ -228,68 +198,17 @@ function GameMap() {
                   createCellGraphic(cell.row, cell.col, data.center_lat, data.center_lng, data.cell_size)
               );
               gridLayerRef.current.addMany(graphics);
-
-          } else {
-              setHasGrid(false);
           }
       } catch (err) {
           console.error("Err loading grid", err);
+          showMessage("Eroare la încărcarea hărții.");
       }
-  };
-
-  // --- 2. REPARARE BUTON RESET ---
-  const createNewGrid = () => {
-      if(!navigator.geolocation) { 
-          showMessage("GPS nedisponibil!", "error"); 
-          return; 
-      }
-      
-      setLoading(true);
-      showMessage("Se calculează poziția GPS...");
-
-      // Curățăm harta vizual IMEDIAT ca să vezi că s-a dat reset
-      if(gridLayerRef.current) {
-          gridLayerRef.current.removeAll();
-          setHasGrid(false); 
-      }
-
-      navigator.geolocation.getCurrentPosition(async (pos) => {
-          const { latitude, longitude } = pos.coords;
-          
-          showMessage("Se generează grid-ul..."); // Feedback vizual
-
-          try {
-              const res = await fetch('http://127.0.0.1:5000/api/create_grid', {
-                  method: 'POST',
-                  headers: {'Content-Type': 'application/json'},
-                  body: JSON.stringify({
-                      user_id: userId,
-                      lat: latitude,
-                      lng: longitude,
-                      force_reset: true // Forțăm ștergerea celui vechi
-                  })
-              });
-              
-              if(res.ok) {
-                  showMessage("✅ Grid generat cu succes!");
-                  loadUserGrid();
-              } else {
-                  showMessage("Eroare la server.", "error");
-              }
-          } catch(e) {
-              showMessage("Eroare de rețea.", "error");
-          } finally {
-              setLoading(false);
-          }
-      }, (err) => {
-          setLoading(false);
-          showMessage("Eroare GPS: " + err.message, "error");
-      });
   };
 
   useEffect(() => {
     if (!mapDiv.current) return;
 
+    // Initialize Map
     const map = new Map({ basemap: "dark-gray-vector" });
     const view = new MapView({
       container: mapDiv.current,
@@ -298,8 +217,11 @@ function GameMap() {
       zoom: 15
     });
 
+    view.ui.move("zoom", "top-right");
+
     viewRef.current = view;
 
+    // Layers
     const gLayer = new GraphicsLayer();
     map.add(gLayer);
     gridLayerRef.current = gLayer;
@@ -308,74 +230,70 @@ function GameMap() {
     map.add(uLayer);
     userLayerRef.current = uLayer;
 
+    // Load grid data from server
     loadUserGrid();
 
-    // CLICK LISTENER (TELEPORT)
+    // 1. CLICK LISTENER (For testing/teleporting)
     view.on("click", (event) => {
         const lat = event.mapPoint.latitude;
         const lng = event.mapPoint.longitude;
 
-        if(userLayerRef.current) {
-            userLayerRef.current.removeAll();
-            const point = { type: "point", longitude: lng, latitude: lat };
-            const markerSymbol = {
-                type: "simple-marker",
-                color: [0, 255, 0], 
-                outline: { color: [255, 255, 255], width: 2 }
-            };
-            userLayerRef.current.add(new Graphic({ geometry: point, symbol: markerSymbol }));
-        }
-        
-        explorePosition(lat, lng);
+        updateUserMarker(lat, lng); // Helper function to draw the dot
+        explorePosition(lat, lng);  // Check server for unlock
     });
 
+    // 2. GPS WATCHER (Real movement)
     if ("geolocation" in navigator) {
         const watcher = navigator.geolocation.watchPosition(
             (position) => {
                 const { latitude, longitude } = position.coords;
                 
-                if(userLayerRef.current) {
-                    userLayerRef.current.removeAll(); 
-                    const point = { type: "point", longitude: longitude, latitude: latitude };
-                    const markerSymbol = {
-                        type: "simple-marker",
-                        color: [0, 119, 255],
-                        outline: { color: [255, 255, 255], width: 2 }
-                    };
-                    userLayerRef.current.add(new Graphic({ geometry: point, symbol: markerSymbol }));
-                }
+                // Draw the user on the map
+                updateUserMarker(latitude, longitude);
+
+                // Check if we unlocked a cell
+                // (This fires on the very first position and every update)
+                explorePosition(latitude, longitude);
             },
-            (err) => console.log(err),
-            { enableHighAccuracy: true }
+            (err) => console.log("GPS Error:", err),
+            { 
+                enableHighAccuracy: true, 
+                maximumAge: 0, 
+                timeout: 5000 
+            }
         );
         return () => navigator.geolocation.clearWatch(watcher);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridId]); // Re-run if we switch grids
+
+  // Helper to keep code clean
+  const updateUserMarker = (lat, lng) => {
+      if(userLayerRef.current) {
+          userLayerRef.current.removeAll(); 
+          const point = { type: "point", longitude: lng, latitude: lat };
+          const markerSymbol = {
+              type: "simple-marker",
+              color: [0, 119, 255], // Blue dot for user
+              outline: { color: [255, 255, 255], width: 2 }
+          };
+          userLayerRef.current.add(new Graphic({ geometry: point, symbol: markerSymbol }));
+      }
+  };
 
   return (
     <div style={{ height: "100vh", width: "100%", position: "relative" }}>
       
-      {/* COMPONENTA DE NOTIFICARE (Toast) */}
       {notification && (
           <div style={styles.notification}>
               {notification}
           </div>
       )}
-      
-      {/* BUTOANELE */}
-      <div style={styles.btnContainer}>
-          {!hasGrid && (
-              <button onClick={createNewGrid} disabled={loading} style={styles.mainBtn}>
-                  {loading ? "Se lucrează..." : "📍 Începe Jocul Aici"}
-              </button>
-          )}
 
-          {hasGrid && (
-              <button onClick={createNewGrid} disabled={loading} style={styles.resetBtn}>
-                  {loading ? "Regenerare..." : "🔄 Mută Grid-ul Aici (Reset)"}
-              </button>
-          )}
-      </div>
+      {/* Back to Menu Button */}
+      <button style={styles.backBtn} onClick={() => navigate('/menu')}>
+          ⬅ Back to Menu
+      </button>
 
       <div className="map-container" ref={mapDiv} style={{ height: "100%", width: "100%" }}></div>
     </div>
@@ -388,7 +306,9 @@ function App() {
       <Routes>
         <Route path="/" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/map" element={<GameMap />} />
+        <Route path="/menu" element={<Menu />} />
+        {/* The Route below captures the ID from URL */}
+        <Route path="/map/:gridId" element={<GameMap />} />
       </Routes>
     </Router>
   );

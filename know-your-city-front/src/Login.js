@@ -21,7 +21,7 @@ function Login() {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user_id', data.user_id); 
         // ----------------------------------------------
-        navigate('/map');
+        navigate('/menu');
       } else {
         alert("Eroare: " + data.message);
       }
