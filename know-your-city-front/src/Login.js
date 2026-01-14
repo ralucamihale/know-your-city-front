@@ -17,8 +17,11 @@ function Login() {
       
       const data = await response.json();
       if (response.ok) {
-        localStorage.setItem('token', data.token); // Salvăm tokenul
-        navigate('/map'); // Mergem la hartă
+        // --- FIX: Salvăm și user_id, nu doar tokenul ---
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user_id', data.user_id); 
+        // ----------------------------------------------
+        navigate('/map');
       } else {
         alert("Eroare: " + data.message);
       }
