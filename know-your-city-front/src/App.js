@@ -3,16 +3,72 @@ import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from '
 import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
+import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer"; // <--- IMPORT NOU (Cerinta 2)
 import Graphic from "@arcgis/core/Graphic";
 import Login from './Login';
 import Register from './Register';
 import Menu from './Menu'; 
 import './App.css';
 
-// --- CONSTANTS ---
-// We use the same coordinates as the Menu to ensure alignment
+// --- CONSTANTE ---
 const HARDCODED_LAT = 44.4363421207524;
 const HARDCODED_LNG = 26.047860301820446;
+
+// --- DATE GEOJSON (Cerinta 2: Set de date GIS standard) ---
+// Acestea sunt repere urbane reale din zona de start (Bucuresti)
+const geoJsonData = {
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [26.047860, 44.436342] 
+            },
+            "properties": {
+                "name": "Start Point (Politehnica)",
+                "type": "Base",
+                "description": "Punctul central de start al jocului."
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [26.051000, 44.438000]
+            },
+            "properties": {
+                "name": "Metrou Grozăvești",
+                "type": "Transport",
+                "description": "Nod important de transport."
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [26.060000, 44.435000]
+            },
+            "properties": {
+                "name": "Grădina Botanică",
+                "type": "Parc",
+                "description": "Zonă verde mare pentru explorare."
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [26.035000, 44.430000]
+            },
+            "properties": {
+                "name": "AFI Cotroceni",
+                "type": "Mall",
+                "description": "Zonă comercială aglomerată."
+            }
+        }
+    ]
+};
 
 const styles = {
     notification: {
@@ -43,6 +99,17 @@ const styles = {
         borderRadius: '5px',
         cursor: 'pointer',
         fontWeight: 'bold'
+    },
+    legend: {
+        position: 'absolute',
+        bottom: '30px',
+        right: '20px',
+        background: 'rgba(255,255,255,0.9)',
+        padding: '10px',
+        borderRadius: '5px',
+        fontSize: '12px',
+        color: 'black',
+        boxShadow: '0 0 5px rgba(0,0,0,0.3)'
     }
 };
 
@@ -218,60 +285,65 @@ function GameMap() {
   useEffect(() => {
     if (!mapDiv.current) return;
 
-    // 1. Initialize Map centered at HARDCODED location
     const map = new Map({ basemap: "dark-gray-vector" });
     const view = new MapView({
       container: mapDiv.current,
       map: map,
-      center: [HARDCODED_LNG, HARDCODED_LAT], // Start camera here
-      zoom: 15
+      center: [HARDCODED_LNG, HARDCODED_LAT], 
+      zoom: 14 // Zoom un pic mai mare sa vedem reperele
     });
     
-    // Zoom buttons top-right
     view.ui.move("zoom", "top-right");
-
     viewRef.current = view;
 
+    // 1. Grid Layer
     const gLayer = new GraphicsLayer();
     map.add(gLayer);
     gridLayerRef.current = gLayer;
+
+    // 2. GeoJSON Layer (NOU PENTRU CERINTA 2)
+    // Cream un Blob pentru a simula incarcarea unui fisier extern
+    const blob = new Blob([JSON.stringify(geoJsonData)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+
+    const geojsonLayer = new GeoJSONLayer({
+        url: url,
+        copyright: "KnowYourCity Data",
+        popupTemplate: {
+            title: "{name}",
+            content: "Tip: {type} <br> Descriere: {description}"
+        },
+        renderer: {
+            type: "simple",
+            symbol: {
+                type: "simple-marker",
+                color: [0, 255, 128, 0.8], // Verde deschis
+                size: 10,
+                outline: { color: "white", width: 1 }
+            }
+        }
+    });
+    map.add(geojsonLayer);
     
+    // 3. User Layer
     const uLayer = new GraphicsLayer();
     map.add(uLayer);
     userLayerRef.current = uLayer;
 
-    // Load grid data
     loadUserGrid();
 
-    // --- 2. SPOOF THE USER LOCATION ---
-    // Instead of waiting for GPS, we immediately place the user 
-    // at the hardcoded coordinates.
     view.when(() => {
         console.log("📍 Spoofing User Location to:", HARDCODED_LAT, HARDCODED_LNG);
-        
-        // A. Draw the blue dot
         updateUserMarker(HARDCODED_LAT, HARDCODED_LNG);
-        
-        // B. Check the server to unlock the cell immediately
         explorePosition(HARDCODED_LAT, HARDCODED_LNG);
     });
 
-    // --- 3. CLICK TO TELEPORT (Development Mode) ---
-    // This lets you simulate walking by clicking around
     view.on("click", (event) => {
         const lat = event.mapPoint.latitude;
         const lng = event.mapPoint.longitude;
-
         updateUserMarker(lat, lng); 
         explorePosition(lat, lng); 
     });
-
-    // --- 4. REAL GPS DISABLED FOR THIS TEST ---
-    /* if ("geolocation" in navigator) {
-        const watcher = navigator.geolocation.watchPosition(...) 
-        // Code commented out to prevent real GPS from overriding our spoof
-    }
-    */
     
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridId]); 
@@ -288,6 +360,12 @@ function GameMap() {
       <button style={styles.backBtn} onClick={() => navigate('/menu')}>
           ⬅ Back to Menu
       </button>
+
+      {/* Mica Legenda pentru GeoJSON */}
+      <div style={styles.legend}>
+         🟢 Repere Urbane (GeoJSON) <br/>
+         🟧 Zone Explorate (Graphics)
+      </div>
 
       <div className="map-container" ref={mapDiv} style={{ height: "100%", width: "100%" }}></div>
     </div>
