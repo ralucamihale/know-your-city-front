@@ -11,7 +11,8 @@ import * as geometryEngine from "@arcgis/core/geometry/geometryEngine";
 
 import Login from './Login';
 import Register from './Register';
-import Menu from './Menu'; 
+import Menu from './Menu';
+import Dashboard from './Dashboard'; // <--- IMPORT NOU
 import './App.css';
 
 // --- CONSTANTE ---
@@ -76,9 +77,8 @@ function GameMap() {
   const gridMetadataRef = useRef(null);
   const userLocationRef = useRef({ latitude: HARDCODED_LAT, longitude: HARDCODED_LNG });
   
-  // --- STATE PENTRU TASTA M ---
   const isMPressed = useRef(false);
-  const [movementMode, setMovementMode] = useState(false); // Doar pentru UI
+  const [movementMode, setMovementMode] = useState(false);
 
   const { gridId } = useParams(); 
   const [notification, setNotification] = useState(null);
@@ -105,7 +105,6 @@ function GameMap() {
       } catch (e) { console.error(e); return false; }
   };
 
-  // --- LOGICA DE RUTARE (OSRM + FALLBACK) ---
   const calculateRoute = async (destinationGraphic) => {
       if (!routeLayerRef.current) return;
       
@@ -160,7 +159,6 @@ function GameMap() {
       routeLayerRef.current.add(graphic);
   };
 
-  // --- LOGICA GRAFICA (Create Cells, Draw Grid) ---
   const createCellGraphic = (row, col, centerLat, centerLng, cellSize, attributes) => {
     const metersPerLat = 111320;
     const metersPerLng = 40075000 * Math.cos(centerLat * Math.PI / 180) / 360;
@@ -278,18 +276,17 @@ function GameMap() {
     }
   };
 
-  // --- KEYBOARD LISTENERS ---
   useEffect(() => {
     const handleKeyDown = (e) => {
         if (e.key.toLowerCase() === 'm') {
             isMPressed.current = true;
-            setMovementMode(true); // Update UI
+            setMovementMode(true); 
         }
     };
     const handleKeyUp = (e) => {
         if (e.key.toLowerCase() === 'm') {
             isMPressed.current = false;
-            setMovementMode(false); // Update UI
+            setMovementMode(false); 
         }
     };
 
@@ -302,7 +299,6 @@ function GameMap() {
     };
   }, []);
 
-  // --- INITIALIZARE HARTA ---
   useEffect(() => {
     if (!mapDiv.current) return;
 
@@ -372,19 +368,14 @@ function GameMap() {
         explorePosition(HARDCODED_LAT, HARDCODED_LNG);
     });
 
-    // --- CLICK HANDLER MODIFICAT ---
     view.on("click", (event) => {
-        // Daca Tasta M este apasata, ne miscam
         if (isMPressed.current) {
-            // Blocăm deschiderea popup-ului (optional, dar util pt UX)
             event.stopPropagation();
-            
             const lat = event.mapPoint.latitude;
             const lng = event.mapPoint.longitude;
             updateUserMarker(lat, lng); 
             explorePosition(lat, lng); 
         } 
-        // Altfel, nu facem nimic aici, lasam ArcGIS sa deschida popup-ul
     });
 
     return () => {
@@ -399,7 +390,6 @@ function GameMap() {
       
       <button style={styles.backBtn} onClick={() => navigate('/menu')}>⬅ Back to Menu</button>
       
-      {/* Panou de Control / Instructiuni */}
       <div style={styles.controls}>
           <div style={{ marginBottom: '10px', fontWeight: 'bold', color: '#e38b4f' }}>
               🎮 Controale Joc:
@@ -430,6 +420,9 @@ function App() {
         <Route path="/" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/menu" element={<Menu />} />
+        {/* --- RUTA ESEMTIALA PENTRU DASHBOARD --- */}
+        <Route path="/dashboard" element={<Dashboard />} />
+        {/* --------------------------------------- */}
         <Route path="/map/:gridId" element={<GameMap />} />
       </Routes>
     </Router>

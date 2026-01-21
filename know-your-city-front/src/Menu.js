@@ -109,8 +109,37 @@ function Menu() {
         <div style={{ padding: '40px', textAlign: 'center', backgroundColor: '#282c34', minHeight: '100vh', color: 'white' }}>
             <h2>🗺️ Your Missions ({grids.length}/3)</h2>
             
+            {/* --- DASHBOARD BUTTON (NEW) --- */}
+            <div style={{ marginBottom: '30px' }}>
+                <button 
+                    onClick={() => navigate('/dashboard')}
+                    style={{ 
+                        padding: '10px 25px', 
+                        background: 'transparent', 
+                        border: '2px solid #e38b4f', 
+                        color: '#e38b4f', 
+                        borderRadius: '20px', 
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                        fontSize: '14px',
+                        transition: 'all 0.2s'
+                    }}
+                    onMouseOver={(e) => {
+                        e.currentTarget.style.background = '#e38b4f';
+                        e.currentTarget.style.color = 'white';
+                    }}
+                    onMouseOut={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.color = '#e38b4f';
+                    }}
+                >
+                    📊 Vezi Statistici & Grafice
+                </button>
+            </div>
+            {/* ----------------------------- */}
+
             {/* --- STANDARD USER GRID LIST --- */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '400px', margin: '30px auto' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', maxWidth: '400px', margin: '0 auto' }}>
                 {grids.length === 0 && <p>No active grids found. Start a new one!</p>}
                 
                 {grids.map(grid => (
@@ -168,7 +197,7 @@ function Menu() {
                     onClick={handleCreateGrid} 
                     disabled={loading}
                     style={{ 
-                        marginTop: '20px',
+                        marginTop: '30px',
                         padding: '15px 30px', 
                         fontSize: '16px', 
                         background: '#28a745', 
