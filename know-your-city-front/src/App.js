@@ -3,69 +3,38 @@ import { BrowserRouter as Router, Routes, Route, useNavigate, useParams } from '
 import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
-import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer"; // <--- IMPORT NOU (Cerinta 2)
+import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer";
 import Graphic from "@arcgis/core/Graphic";
 import Login from './Login';
 import Register from './Register';
 import Menu from './Menu'; 
 import './App.css';
 
-// --- CONSTANTE ---
 const HARDCODED_LAT = 44.4363421207524;
 const HARDCODED_LNG = 26.047860301820446;
 
-// --- DATE GEOJSON (Cerinta 2: Set de date GIS standard) ---
-// Acestea sunt repere urbane reale din zona de start (Bucuresti)
 const geoJsonData = {
     "type": "FeatureCollection",
     "features": [
         {
             "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [26.047860, 44.436342] 
-            },
-            "properties": {
-                "name": "Start Point (Politehnica)",
-                "type": "Base",
-                "description": "Punctul central de start al jocului."
-            }
+            "geometry": { "type": "Point", "coordinates": [26.047860, 44.436342] },
+            "properties": { "name": "Start Point (Politehnica)", "type": "Base", "description": "Punctul central de start." }
         },
         {
             "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [26.051000, 44.438000]
-            },
-            "properties": {
-                "name": "Metrou Grozăvești",
-                "type": "Transport",
-                "description": "Nod important de transport."
-            }
+            "geometry": { "type": "Point", "coordinates": [26.051000, 44.438000] },
+            "properties": { "name": "Metrou Grozăvești", "type": "Transport", "description": "Nod important de transport." }
         },
         {
             "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [26.060000, 44.435000]
-            },
-            "properties": {
-                "name": "Grădina Botanică",
-                "type": "Parc",
-                "description": "Zonă verde mare pentru explorare."
-            }
+            "geometry": { "type": "Point", "coordinates": [26.060000, 44.435000] },
+            "properties": { "name": "Grădina Botanică", "type": "Parc", "description": "Zonă verde mare." }
         },
         {
             "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [26.035000, 44.430000]
-            },
-            "properties": {
-                "name": "AFI Cotroceni",
-                "type": "Mall",
-                "description": "Zonă comercială aglomerată."
-            }
+            "geometry": { "type": "Point", "coordinates": [26.035000, 44.430000] },
+            "properties": { "name": "AFI Cotroceni", "type": "Mall", "description": "Zonă comercială." }
         }
     ]
 };
@@ -136,7 +105,8 @@ function GameMap() {
       setTimeout(() => setNotification(null), 3000);
   };
 
-  const createCellGraphic = (row, col, centerLat, centerLng, cellSize) => {
+  // --- UPDATE: Added 'attributes' param and 'popupTemplate' ---
+  const createCellGraphic = (row, col, centerLat, centerLng, cellSize, attributes) => {
     const metersPerLat = 111320;
     const metersPerLng = 40075000 * Math.cos(centerLat * Math.PI / 180) / 360;
 
@@ -166,13 +136,22 @@ function GameMap() {
             type: "simple-fill",
             color: [227, 139, 79, 0.6],
             outline: { color: [255, 255, 255], width: 1 }
+        },
+        // ADDED ATTRIBUTES & POPUP
+        attributes: attributes, 
+        popupTemplate: {
+            title: "Cell Coordinates: [{row}, {col}]",
+            content: `
+                <b>Status:</b> Unlocked <br>
+                <b>Time:</b> {time} <br>
+                <b>Note:</b> {msg}
+            `
         }
     });
   };
 
   const drawGridOutline = (centerLat, centerLng, dimension, cellSize) => {
     if(!gridLayerRef.current) return;
-
     const metersPerLat = 111320;
     const metersPerLng = 40075000 * Math.cos(centerLat * Math.PI / 180) / 360;
     const totalSizeMeters = dimension * cellSize;
@@ -199,7 +178,6 @@ function GameMap() {
             style: "dash"
         }
     });
-
     gridLayerRef.current.add(outlineGraphic);
   };
 
@@ -221,12 +199,19 @@ function GameMap() {
               if (gridMetadataRef.current && gridLayerRef.current) {
                   showMessage(`🎉 Zonă nouă descoperită! (${data.row}, ${data.col})`);
                   
+                  // --- Pass attributes for the new cell immediately ---
                   const newGraphic = createCellGraphic(
                       data.row, 
                       data.col, 
                       gridMetadataRef.current.centerLat, 
                       gridMetadataRef.current.centerLng, 
-                      gridMetadataRef.current.cellSize
+                      gridMetadataRef.current.cellSize,
+                      {
+                          row: data.row,
+                          col: data.col,
+                          msg: "Explored just now!",
+                          time: data.time // timestamp from server
+                      }
                   );
                   gridLayerRef.current.add(newGraphic);
               }
@@ -253,13 +238,23 @@ function GameMap() {
               };
 
               gridLayerRef.current.removeAll(); 
-              
-              // Draw Grid Outline
               drawGridOutline(data.center_lat, data.center_lng, data.dimension, data.cell_size);
 
-              // Draw Already Unlocked Cells
+              // --- Pass fetched attributes (time, msg) ---
               const graphics = data.unlocked_cells.map(cell => 
-                  createCellGraphic(cell.row, cell.col, data.center_lat, data.center_lng, data.cell_size)
+                  createCellGraphic(
+                      cell.row, 
+                      cell.col, 
+                      data.center_lat, 
+                      data.center_lng, 
+                      data.cell_size,
+                      {
+                          row: cell.row,
+                          col: cell.col,
+                          msg: cell.msg || "Explored",
+                          time: cell.time
+                      }
+                  )
               );
               gridLayerRef.current.addMany(graphics);
           }
@@ -290,22 +285,18 @@ function GameMap() {
       container: mapDiv.current,
       map: map,
       center: [HARDCODED_LNG, HARDCODED_LAT], 
-      zoom: 14 // Zoom un pic mai mare sa vedem reperele
+      zoom: 14 
     });
     
     view.ui.move("zoom", "top-right");
     viewRef.current = view;
 
-    // 1. Grid Layer
     const gLayer = new GraphicsLayer();
     map.add(gLayer);
     gridLayerRef.current = gLayer;
 
-    // 2. GeoJSON Layer (NOU PENTRU CERINTA 2)
-    // Cream un Blob pentru a simula incarcarea unui fisier extern
     const blob = new Blob([JSON.stringify(geoJsonData)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-
     const geojsonLayer = new GeoJSONLayer({
         url: url,
         copyright: "KnowYourCity Data",
@@ -317,7 +308,7 @@ function GameMap() {
             type: "simple",
             symbol: {
                 type: "simple-marker",
-                color: [0, 255, 128, 0.8], // Verde deschis
+                color: [0, 255, 128, 0.8], 
                 size: 10,
                 outline: { color: "white", width: 1 }
             }
@@ -325,7 +316,6 @@ function GameMap() {
     });
     map.add(geojsonLayer);
     
-    // 3. User Layer
     const uLayer = new GraphicsLayer();
     map.add(uLayer);
     userLayerRef.current = uLayer;
@@ -333,7 +323,6 @@ function GameMap() {
     loadUserGrid();
 
     view.when(() => {
-        console.log("📍 Spoofing User Location to:", HARDCODED_LAT, HARDCODED_LNG);
         updateUserMarker(HARDCODED_LAT, HARDCODED_LNG);
         explorePosition(HARDCODED_LAT, HARDCODED_LNG);
     });
@@ -345,28 +334,13 @@ function GameMap() {
         explorePosition(lat, lng); 
     });
     
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridId]); 
 
   return (
     <div style={{ height: "100vh", width: "100%", position: "relative" }}>
-      
-      {notification && (
-          <div style={styles.notification}>
-              {notification}
-          </div>
-      )}
-
-      <button style={styles.backBtn} onClick={() => navigate('/menu')}>
-          ⬅ Back to Menu
-      </button>
-
-      {/* Mica Legenda pentru GeoJSON */}
-      <div style={styles.legend}>
-         🟢 Repere Urbane (GeoJSON) <br/>
-         🟧 Zone Explorate (Graphics)
-      </div>
-
+      {notification && ( <div style={styles.notification}>{notification}</div> )}
+      <button style={styles.backBtn} onClick={() => navigate('/menu')}>⬅ Back to Menu</button>
+      <div style={styles.legend}>🟢 Repere Urbane (GeoJSON) <br/>🟧 Zone Explorate (Graphics)</div>
       <div className="map-container" ref={mapDiv} style={{ height: "100%", width: "100%" }}></div>
     </div>
   );
