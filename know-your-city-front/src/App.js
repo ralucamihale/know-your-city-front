@@ -12,7 +12,7 @@ import * as geometryEngine from "@arcgis/core/geometry/geometryEngine";
 import Login from './Login';
 import Register from './Register';
 import Menu from './Menu';
-import Dashboard from './Dashboard'; // <--- IMPORT NOU
+import Dashboard from './Dashboard'; 
 import './App.css';
 
 // --- CONSTANTE ---
@@ -52,7 +52,9 @@ const styles = {
         borderRadius: '8px', zIndex: 100, pointerEvents: 'none'
     },
     controls: {
-        position: 'absolute', bottom: '30px', left: '20px',
+        position: 'absolute', 
+        bottom: '120px', 
+        left: '20px',
         backgroundColor: 'rgba(0, 0, 0, 0.7)', color: '#fff', padding: '15px',
         borderRadius: '8px', fontSize: '14px', maxWidth: '250px'
     },
@@ -77,6 +79,10 @@ function GameMap() {
   const gridMetadataRef = useRef(null);
   const userLocationRef = useRef({ latitude: HARDCODED_LAT, longitude: HARDCODED_LNG });
   
+  // --- REFERINTA PENTRU ABORT CONTROLLER (FIX EROARE) ---
+  const abortControllerRef = useRef(null);
+  // ------------------------------------------------------
+
   const isMPressed = useRef(false);
   const [movementMode, setMovementMode] = useState(false);
 
@@ -108,6 +114,15 @@ function GameMap() {
   const calculateRoute = async (destinationGraphic) => {
       if (!routeLayerRef.current) return;
       
+      // 1. ANULAM CEREREA ANTERIOARA DACA EXISTA (FIX EROARE)
+      if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+      }
+      // Cream un controller nou pentru cererea curenta
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
+      // -----------------------------------------------------
+
       showMessage("⏳ Calculare traseu...");
 
       const startLng = userLocationRef.current.longitude;
@@ -125,7 +140,9 @@ function GameMap() {
       const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
 
       try {
-          const response = await fetch(osrmUrl);
+          // Adaugam { signal } la fetch
+          const response = await fetch(osrmUrl, { signal });
+          
           if (!response.ok) throw new Error("OSRM Failed");
           
           const data = await response.json();
@@ -139,6 +156,13 @@ function GameMap() {
           showMessage(`🚗 Traseu (OSRM): ${distKm} km (~${timeMin} min)`);
 
       } catch (error) {
+          // --- FIX EROARE: DACA E ABORT, NU FACEM NIMIC ---
+          if (error.name === 'AbortError') {
+              console.log("Navigare anulată (utilizator a dat click altundeva).");
+              return; 
+          }
+          // ------------------------------------------------
+
           console.warn("⚠️ Fallback to direct line:", error);
           const directPath = [[startLng, startLat], [endLng, endLat]];
           drawPolyline(directPath, [255, 50, 50, 0.8], "dash"); 
@@ -334,6 +358,8 @@ function GameMap() {
       container: mapDiv.current, map: map, center: [HARDCODED_LNG, HARDCODED_LAT], zoom: 14,
       popup: myPopup 
     });
+    
+    view.ui.move("zoom", "bottom-left");
     viewRef.current = view;
 
     const gLayer = new GraphicsLayer(); map.add(gLayer); gridLayerRef.current = gLayer;
@@ -420,9 +446,7 @@ function App() {
         <Route path="/" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/menu" element={<Menu />} />
-        {/* --- RUTA ESEMTIALA PENTRU DASHBOARD --- */}
         <Route path="/dashboard" element={<Dashboard />} />
-        {/* --------------------------------------- */}
         <Route path="/map/:gridId" element={<GameMap />} />
       </Routes>
     </Router>
