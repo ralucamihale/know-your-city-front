@@ -5,13 +5,16 @@ import MapView from "@arcgis/core/views/MapView";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer";
 import Graphic from "@arcgis/core/Graphic";
-import Popup from "@arcgis/core/widgets/Popup"; // Asigura-te ca ai acest import
+import Popup from "@arcgis/core/widgets/Popup";
+import Polyline from "@arcgis/core/geometry/Polyline";
+import * as geometryEngine from "@arcgis/core/geometry/geometryEngine"; 
+
 import Login from './Login';
 import Register from './Register';
 import Menu from './Menu'; 
 import './App.css';
 
-// --- CONSTANTS ---
+// --- CONSTANTE ---
 const HARDCODED_LAT = 44.4363421207524;
 const HARDCODED_LNG = 26.047860301820446;
 
@@ -43,44 +46,24 @@ const geoJsonData = {
 
 const styles = {
     notification: {
-        position: 'absolute',
-        top: '20px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        color: 'white',
-        padding: '12px 24px',
-        borderRadius: '8px',
-        zIndex: 100,
-        fontSize: '16px',
-        fontWeight: '500',
-        boxShadow: '0 4px 6px rgba(0,0,0,0.2)',
-        pointerEvents: 'none',
-        transition: 'opacity 0.3s ease-in-out',
+        position: 'absolute', top: '20px', left: '50%', transform: 'translateX(-50%)',
+        backgroundColor: 'rgba(0, 0, 0, 0.8)', color: 'white', padding: '12px 24px',
+        borderRadius: '8px', zIndex: 100, pointerEvents: 'none'
+    },
+    controls: {
+        position: 'absolute', bottom: '30px', left: '20px',
+        backgroundColor: 'rgba(0, 0, 0, 0.7)', color: '#fff', padding: '15px',
+        borderRadius: '8px', fontSize: '14px', maxWidth: '250px'
     },
     backBtn: {
-        position: 'absolute',
-        top: '20px',
-        left: '20px',
-        zIndex: 90,
-        padding: '10px 20px',
-        background: '#333',
-        color: 'white',
-        border: 'none',
-        borderRadius: '5px',
-        cursor: 'pointer',
-        fontWeight: 'bold'
+        position: 'absolute', top: '20px', left: '20px', zIndex: 90,
+        padding: '10px 20px', background: '#333', color: 'white', border: 'none',
+        borderRadius: '5px', cursor: 'pointer', fontWeight: 'bold'
     },
     legend: {
-        position: 'absolute',
-        bottom: '30px',
-        right: '20px',
-        background: 'rgba(255,255,255,0.9)',
-        padding: '10px',
-        borderRadius: '5px',
-        fontSize: '12px',
-        color: 'black',
-        boxShadow: '0 0 5px rgba(0,0,0,0.3)'
+        position: 'absolute', bottom: '30px', right: '20px',
+        background: 'rgba(255,255,255,0.9)', padding: '10px', borderRadius: '5px',
+        fontSize: '12px', color: 'black', boxShadow: '0 0 5px rgba(0,0,0,0.3)'
     }
 };
 
@@ -89,7 +72,13 @@ function GameMap() {
   const viewRef = useRef(null);
   const gridLayerRef = useRef(null);
   const userLayerRef = useRef(null);
+  const routeLayerRef = useRef(null);
   const gridMetadataRef = useRef(null);
+  const userLocationRef = useRef({ latitude: HARDCODED_LAT, longitude: HARDCODED_LNG });
+  
+  // --- STATE PENTRU TASTA M ---
+  const isMPressed = useRef(false);
+  const [movementMode, setMovementMode] = useState(false); // Doar pentru UI
 
   const { gridId } = useParams(); 
   const [notification, setNotification] = useState(null);
@@ -97,9 +86,7 @@ function GameMap() {
   const navigate = useNavigate();
 
   useEffect(() => {
-      if (!userId) {
-          navigate('/');
-      }
+      if (!userId) navigate('/');
   }, [userId, navigate]);
 
   const showMessage = (msg) => {
@@ -112,39 +99,77 @@ function GameMap() {
         const res = await fetch('http://127.0.0.1:5000/api/update_message', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                user_id: userId,
-                grid_id: gridId,
-                row: row,
-                col: col,
-                message: newMessage
-            })
+            body: JSON.stringify({ user_id: userId, grid_id: gridId, row, col, message: newMessage })
         });
-        if (res.ok) {
-            showMessage("✅ Notiță actualizată!");
-            return true;
-        } else {
-            showMessage("❌ Eroare la salvare.");
-            return false;
-        }
-      } catch (e) {
-          console.error(e);
-          return false;
+        return res.ok;
+      } catch (e) { console.error(e); return false; }
+  };
+
+  // --- LOGICA DE RUTARE (OSRM + FALLBACK) ---
+  const calculateRoute = async (destinationGraphic) => {
+      if (!routeLayerRef.current) return;
+      
+      showMessage("⏳ Calculare traseu...");
+
+      const startLng = userLocationRef.current.longitude;
+      const startLat = userLocationRef.current.latitude;
+      
+      let endLng = 0, endLat = 0;
+      if (destinationGraphic.geometry.type === 'point') {
+          endLng = destinationGraphic.geometry.longitude;
+          endLat = destinationGraphic.geometry.latitude;
+      } else if (Array.isArray(destinationGraphic.geometry.coordinates)) {
+          endLng = destinationGraphic.geometry.coordinates[0];
+          endLat = destinationGraphic.geometry.coordinates[1];
+      }
+
+      const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=full&geometries=geojson`;
+
+      try {
+          const response = await fetch(osrmUrl);
+          if (!response.ok) throw new Error("OSRM Failed");
+          
+          const data = await response.json();
+          if (data.code !== "Ok") throw new Error("OSRM Route Not Found");
+
+          const routeCoordinates = data.routes[0].geometry.coordinates;
+          const distKm = (data.routes[0].distance / 1000).toFixed(2);
+          const timeMin = Math.round(data.routes[0].duration / 60);
+
+          drawPolyline(routeCoordinates, [50, 150, 255, 0.9]); 
+          showMessage(`🚗 Traseu (OSRM): ${distKm} km (~${timeMin} min)`);
+
+      } catch (error) {
+          console.warn("⚠️ Fallback to direct line:", error);
+          const directPath = [[startLng, startLat], [endLng, endLat]];
+          drawPolyline(directPath, [255, 50, 50, 0.8], "dash"); 
+          
+          const polyline = new Polyline({ paths: [directPath], spatialReference: { wkid: 4326 } });
+          const dist = geometryEngine.geodesicLength(polyline, "kilometers");
+          showMessage(`✈️ Rută Directă: ${dist.toFixed(2)} km`);
       }
   };
 
+  const drawPolyline = (paths, color, style = "solid") => {
+      routeLayerRef.current.removeAll();
+      const polyline = new Polyline({ paths: [paths], spatialReference: { wkid: 4326 } });
+      const graphic = new Graphic({
+          geometry: polyline,
+          symbol: { type: "simple-line", color: color, width: 4, style: style }
+      });
+      routeLayerRef.current.add(graphic);
+  };
+
+  // --- LOGICA GRAFICA (Create Cells, Draw Grid) ---
   const createCellGraphic = (row, col, centerLat, centerLng, cellSize, attributes) => {
     const metersPerLat = 111320;
     const metersPerLng = 40075000 * Math.cos(centerLat * Math.PI / 180) / 360;
-
     const latOffset = (row * cellSize) / metersPerLat; 
     const lngOffset = (col * cellSize) / metersPerLng;
-
-    const cellCenterLat = centerLat + latOffset;
-    const cellCenterLng = centerLng + lngOffset;
-
     const halfSizeLat = (cellSize / 2) / metersPerLat;
     const halfSizeLng = (cellSize / 2) / metersPerLng;
+    const cellCenterLat = centerLat + latOffset;
+    const cellCenterLng = centerLng + lngOffset;
 
     const polygon = {
         type: "polygon",
@@ -159,24 +184,12 @@ function GameMap() {
 
     return new Graphic({
         geometry: polygon,
-        symbol: {
-            type: "simple-fill",
-            color: [227, 139, 79, 0.6],
-            outline: { color: [255, 255, 255], width: 1 }
-        },
+        symbol: { type: "simple-fill", color: [227, 139, 79, 0.6], outline: { color: [255, 255, 255], width: 1 } },
         attributes: attributes, 
         popupTemplate: {
             title: "Cell [{row}, {col}]",
-            content: `
-                <b>Status:</b> Unlocked <br>
-                <b>Time:</b> {time} <br>
-                <b>Note:</b> {msg}
-            `,
-            actions: [{
-                title: "Editează Notița",
-                id: "edit-note",
-                className: "esri-icon-edit"
-            }]
+            content: `<b>Status:</b> Unlocked<br><b>Time:</b> {time}<br><b>Note:</b> {msg}`,
+            actions: [{ title: "Editează Notița", id: "edit-note", className: "esri-icon-edit" }]
         }
     });
   };
@@ -200,16 +213,10 @@ function GameMap() {
         ]
     };
 
-    const outlineGraphic = new Graphic({
+    gridLayerRef.current.add(new Graphic({
         geometry: outlinePolygon,
-        symbol: {
-            type: "simple-line",
-            color: [255, 255, 255, 0.8],
-            width: 2,
-            style: "dash"
-        }
-    });
-    gridLayerRef.current.add(outlineGraphic);
+        symbol: { type: "simple-line", color: [255, 255, 255, 0.8], width: 2, style: "dash" }
+    }));
   };
 
   const explorePosition = async (lat, lng) => {
@@ -217,157 +224,125 @@ function GameMap() {
           const res = await fetch('http://127.0.0.1:5000/api/explore', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ 
-                  lat, 
-                  lng, 
-                  user_id: userId,
-                  grid_id: gridId 
-              })
+              body: JSON.stringify({ lat, lng, user_id: userId, grid_id: gridId })
           });
           const data = await res.json();
           
           if(data.status === 'unlocked') {
               if (gridMetadataRef.current && gridLayerRef.current) {
                   showMessage(`🎉 Zonă nouă descoperită! (${data.row}, ${data.col})`);
-                  
                   const newGraphic = createCellGraphic(
-                      data.row, 
-                      data.col, 
-                      gridMetadataRef.current.centerLat, 
-                      gridMetadataRef.current.centerLng, 
+                      data.row, data.col, 
+                      gridMetadataRef.current.centerLat, gridMetadataRef.current.centerLng, 
                       gridMetadataRef.current.cellSize,
-                      {
-                          row: data.row,
-                          col: data.col,
-                          msg: "Explored just now!",
-                          time: data.time 
-                      }
+                      { row: data.row, col: data.col, msg: "Explored just now!", time: data.time }
                   );
                   gridLayerRef.current.add(newGraphic);
               }
           }
-      } catch (e) {
-          console.log("Eroare explorare", e);
-      }
+      } catch (e) { console.log("Eroare explorare", e); }
   };
 
   const loadUserGrid = async () => {
       try {
           const res = await fetch(`http://127.0.0.1:5000/api/grid_data/${gridId}`);
           if (!res.ok) throw new Error("Grid not found");
-
           const data = await res.json();
           
           if(data.has_grid && gridLayerRef.current) {
-              
               gridMetadataRef.current = {
-                  centerLat: data.center_lat,
-                  centerLng: data.center_lng,
-                  cellSize: data.cell_size,
-                  dimension: data.dimension
+                  centerLat: data.center_lat, centerLng: data.center_lng,
+                  cellSize: data.cell_size, dimension: data.dimension
               };
-
               gridLayerRef.current.removeAll(); 
               drawGridOutline(data.center_lat, data.center_lng, data.dimension, data.cell_size);
-
               const graphics = data.unlocked_cells.map(cell => 
                   createCellGraphic(
-                      cell.row, 
-                      cell.col, 
-                      data.center_lat, 
-                      data.center_lng, 
-                      data.cell_size,
-                      {
-                          row: cell.row,
-                          col: cell.col,
-                          msg: cell.msg || "Explored",
-                          time: cell.time
-                      }
+                      cell.row, cell.col, data.center_lat, data.center_lng, data.cell_size,
+                      { row: cell.row, col: cell.col, msg: cell.msg || "Explored", time: cell.time }
                   )
               );
               gridLayerRef.current.addMany(graphics);
           }
-      } catch (err) {
-          console.error("Err loading grid", err);
-          showMessage("Eroare la încărcarea hărții.");
-      }
+      } catch (err) { console.error(err); showMessage("Eroare la încărcarea hărții."); }
   };
 
   const updateUserMarker = (lat, lng) => {
+    userLocationRef.current = { latitude: lat, longitude: lng };
     if(userLayerRef.current) {
         userLayerRef.current.removeAll(); 
-        const point = { type: "point", longitude: lng, latitude: lat };
-        const markerSymbol = {
-            type: "simple-marker",
-            color: [0, 119, 255], 
-            outline: { color: [255, 255, 255], width: 2 }
-        };
-        userLayerRef.current.add(new Graphic({ geometry: point, symbol: markerSymbol }));
+        userLayerRef.current.add(new Graphic({ 
+            geometry: { type: "point", longitude: lng, latitude: lat }, 
+            symbol: { type: "simple-marker", color: [0, 119, 255], outline: { color: "white", width: 2 } } 
+        }));
     }
   };
 
+  // --- KEYBOARD LISTENERS ---
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+        if (e.key.toLowerCase() === 'm') {
+            isMPressed.current = true;
+            setMovementMode(true); // Update UI
+        }
+    };
+    const handleKeyUp = (e) => {
+        if (e.key.toLowerCase() === 'm') {
+            isMPressed.current = false;
+            setMovementMode(false); // Update UI
+        }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+        window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  // --- INITIALIZARE HARTA ---
   useEffect(() => {
     if (!mapDiv.current) return;
 
-    // 1. Initializam Harta
     const map = new Map({ basemap: "dark-gray-vector" });
-
-    // 2. Initializam POPUP-ul manual (FOARTE IMPORTANT)
     const myPopup = new Popup({
         dockEnabled: true,
-        dockOptions: {
-            buttonEnabled: false,
-            breakpoint: false
-        }
+        dockOptions: { buttonEnabled: false, breakpoint: false }
     });
 
-    // 3. Atasam listener-ul pe instanta creata DIRECT (inainte de a o pune in view)
-    // Astfel suntem siguri ca evenimentul este prins.
-    const actionHandle = myPopup.on("trigger-action", async (event) => {
-        // Log pentru debug
-        console.log("🔥 Popup Action Triggered:", event.action.id);
+    const actionHandle = myPopup.on("trigger-action", (event) => {
+        const selectedFeature = myPopup.selectedFeature;
+        const attrs = selectedFeature.attributes;
 
         if (event.action.id === "edit-note") {
-            const selectedFeature = myPopup.selectedFeature; // Luam feature-ul din popup-ul nostru
-            const attrs = selectedFeature.attributes;
-            
             const newMsg = prompt("Editează mesajul:", attrs.msg);
-            
             if (newMsg !== null && newMsg !== attrs.msg) {
-                // Apelam functia de update
-                const success = await updateCellMessage(attrs.row, attrs.col, newMsg);
-                
-                if (success) {
-                    // Update local
-                    selectedFeature.attributes.msg = newMsg;
-                    
-                    // Update vizual fortat
-                    myPopup.content = `
-                        <b>Status:</b> Unlocked <br>
-                        <b>Time:</b> ${attrs.time} <br>
-                        <b>Note:</b> ${newMsg}
-                    `;
-                }
+                updateCellMessage(attrs.row, attrs.col, newMsg).then(success => {
+                    if (success) {
+                        selectedFeature.attributes.msg = newMsg;
+                        myPopup.content = `<b>Status:</b> Unlocked<br><b>Time:</b> ${attrs.time}<br><b>Note:</b> ${newMsg}`;
+                    }
+                });
             }
+        }
+        
+        if (event.action.id === "navigate-route") {
+            myPopup.close();
+            calculateRoute(selectedFeature);
         }
     });
 
-    // 4. Initializam VIEW-ul si ii dam popup-ul nostru
     const view = new MapView({
-      container: mapDiv.current,
-      map: map,
-      center: [HARDCODED_LNG, HARDCODED_LAT], 
-      zoom: 14,
-      popup: myPopup // <--- Aici folosim popup-ul configurat mai sus
+      container: mapDiv.current, map: map, center: [HARDCODED_LNG, HARDCODED_LAT], zoom: 14,
+      popup: myPopup 
     });
-    
-    view.ui.move("zoom", "top-right");
     viewRef.current = view;
 
-    // --- Layerele standard ---
-    const gLayer = new GraphicsLayer();
-    map.add(gLayer);
-    gridLayerRef.current = gLayer;
+    const gLayer = new GraphicsLayer(); map.add(gLayer); gridLayerRef.current = gLayer;
+    const rLayer = new GraphicsLayer(); map.add(rLayer); routeLayerRef.current = rLayer;
+    const uLayer = new GraphicsLayer(); map.add(uLayer); userLayerRef.current = uLayer;
 
     const blob = new Blob([JSON.stringify(geoJsonData)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -376,24 +351,20 @@ function GameMap() {
         copyright: "KnowYourCity Data",
         popupTemplate: {
             title: "{name}",
-            content: "Tip: {type} <br> Descriere: {description}"
+            content: "Tip: {type} <br> Descriere: {description}",
+            actions: [{
+                title: "🚗 Navighează aici",
+                id: "navigate-route",
+                className: "esri-icon-navigation"
+            }]
         },
         renderer: {
             type: "simple",
-            symbol: {
-                type: "simple-marker",
-                color: [0, 255, 128, 0.8], 
-                size: 10,
-                outline: { color: "white", width: 1 }
-            }
+            symbol: { type: "simple-marker", color: [0, 255, 128, 0.8], size: 10, outline: { color: "white", width: 1 } }
         }
     });
     map.add(geojsonLayer);
     
-    const uLayer = new GraphicsLayer();
-    map.add(uLayer);
-    userLayerRef.current = uLayer;
-
     loadUserGrid();
 
     view.when(() => {
@@ -401,27 +372,52 @@ function GameMap() {
         explorePosition(HARDCODED_LAT, HARDCODED_LNG);
     });
 
+    // --- CLICK HANDLER MODIFICAT ---
     view.on("click", (event) => {
-        const lat = event.mapPoint.latitude;
-        const lng = event.mapPoint.longitude;
-        updateUserMarker(lat, lng); 
-        explorePosition(lat, lng); 
+        // Daca Tasta M este apasata, ne miscam
+        if (isMPressed.current) {
+            // Blocăm deschiderea popup-ului (optional, dar util pt UX)
+            event.stopPropagation();
+            
+            const lat = event.mapPoint.latitude;
+            const lng = event.mapPoint.longitude;
+            updateUserMarker(lat, lng); 
+            explorePosition(lat, lng); 
+        } 
+        // Altfel, nu facem nimic aici, lasam ArcGIS sa deschida popup-ul
     });
 
-    // Cleanup
     return () => {
-        if (actionHandle) actionHandle.remove(); // Scoatem listener-ul
+        if (actionHandle) actionHandle.remove();
         if (view) view.destroy();
     };
-    
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridId]); 
 
   return (
     <div style={{ height: "100vh", width: "100%", position: "relative" }}>
       {notification && ( <div style={styles.notification}>{notification}</div> )}
+      
       <button style={styles.backBtn} onClick={() => navigate('/menu')}>⬅ Back to Menu</button>
-      <div style={styles.legend}>🟢 Repere Urbane (GeoJSON) <br/>🟧 Zone Explorate (Graphics)</div>
+      
+      {/* Panou de Control / Instructiuni */}
+      <div style={styles.controls}>
+          <div style={{ marginBottom: '10px', fontWeight: 'bold', color: '#e38b4f' }}>
+              🎮 Controale Joc:
+          </div>
+          <div>👆 <b>Click Stânga:</b> Selectează / Informații</div>
+          <div>🏃 <b>Ține apăsat M + Click:</b> Deplasează-te</div>
+          <div style={{ marginTop: '10px', fontSize: '12px', color: '#ccc' }}>
+              Mod Deplasare: <span style={{ color: movementMode ? '#0f0' : '#f00', fontWeight: 'bold' }}>
+                  {movementMode ? "ACTIV" : "INACTIV"}
+              </span>
+          </div>
+      </div>
+
+      <div style={styles.legend}>
+          🟢 Repere Urbane <br/>
+          🟧 Zone Explorate <br/>
+          🔵 Traseu Activ
+      </div>
       <div className="map-container" ref={mapDiv} style={{ height: "100%", width: "100%" }}></div>
     </div>
   );
