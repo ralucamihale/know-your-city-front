@@ -5,11 +5,13 @@ import MapView from "@arcgis/core/views/MapView";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer";
 import Graphic from "@arcgis/core/Graphic";
+import Popup from "@arcgis/core/widgets/Popup"; // Asigura-te ca ai acest import
 import Login from './Login';
 import Register from './Register';
 import Menu from './Menu'; 
 import './App.css';
 
+// --- CONSTANTS ---
 const HARDCODED_LAT = 44.4363421207524;
 const HARDCODED_LNG = 26.047860301820446;
 
@@ -105,7 +107,32 @@ function GameMap() {
       setTimeout(() => setNotification(null), 3000);
   };
 
-  // --- UPDATE: Added 'attributes' param and 'popupTemplate' ---
+  const updateCellMessage = async (row, col, newMessage) => {
+      try {
+        const res = await fetch('http://127.0.0.1:5000/api/update_message', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_id: userId,
+                grid_id: gridId,
+                row: row,
+                col: col,
+                message: newMessage
+            })
+        });
+        if (res.ok) {
+            showMessage("✅ Notiță actualizată!");
+            return true;
+        } else {
+            showMessage("❌ Eroare la salvare.");
+            return false;
+        }
+      } catch (e) {
+          console.error(e);
+          return false;
+      }
+  };
+
   const createCellGraphic = (row, col, centerLat, centerLng, cellSize, attributes) => {
     const metersPerLat = 111320;
     const metersPerLng = 40075000 * Math.cos(centerLat * Math.PI / 180) / 360;
@@ -137,15 +164,19 @@ function GameMap() {
             color: [227, 139, 79, 0.6],
             outline: { color: [255, 255, 255], width: 1 }
         },
-        // ADDED ATTRIBUTES & POPUP
         attributes: attributes, 
         popupTemplate: {
-            title: "Cell Coordinates: [{row}, {col}]",
+            title: "Cell [{row}, {col}]",
             content: `
                 <b>Status:</b> Unlocked <br>
                 <b>Time:</b> {time} <br>
                 <b>Note:</b> {msg}
-            `
+            `,
+            actions: [{
+                title: "Editează Notița",
+                id: "edit-note",
+                className: "esri-icon-edit"
+            }]
         }
     });
   };
@@ -199,7 +230,6 @@ function GameMap() {
               if (gridMetadataRef.current && gridLayerRef.current) {
                   showMessage(`🎉 Zonă nouă descoperită! (${data.row}, ${data.col})`);
                   
-                  // --- Pass attributes for the new cell immediately ---
                   const newGraphic = createCellGraphic(
                       data.row, 
                       data.col, 
@@ -210,7 +240,7 @@ function GameMap() {
                           row: data.row,
                           col: data.col,
                           msg: "Explored just now!",
-                          time: data.time // timestamp from server
+                          time: data.time 
                       }
                   );
                   gridLayerRef.current.add(newGraphic);
@@ -240,7 +270,6 @@ function GameMap() {
               gridLayerRef.current.removeAll(); 
               drawGridOutline(data.center_lat, data.center_lng, data.dimension, data.cell_size);
 
-              // --- Pass fetched attributes (time, msg) ---
               const graphics = data.unlocked_cells.map(cell => 
                   createCellGraphic(
                       cell.row, 
@@ -280,17 +309,62 @@ function GameMap() {
   useEffect(() => {
     if (!mapDiv.current) return;
 
+    // 1. Initializam Harta
     const map = new Map({ basemap: "dark-gray-vector" });
+
+    // 2. Initializam POPUP-ul manual (FOARTE IMPORTANT)
+    const myPopup = new Popup({
+        dockEnabled: true,
+        dockOptions: {
+            buttonEnabled: false,
+            breakpoint: false
+        }
+    });
+
+    // 3. Atasam listener-ul pe instanta creata DIRECT (inainte de a o pune in view)
+    // Astfel suntem siguri ca evenimentul este prins.
+    const actionHandle = myPopup.on("trigger-action", async (event) => {
+        // Log pentru debug
+        console.log("🔥 Popup Action Triggered:", event.action.id);
+
+        if (event.action.id === "edit-note") {
+            const selectedFeature = myPopup.selectedFeature; // Luam feature-ul din popup-ul nostru
+            const attrs = selectedFeature.attributes;
+            
+            const newMsg = prompt("Editează mesajul:", attrs.msg);
+            
+            if (newMsg !== null && newMsg !== attrs.msg) {
+                // Apelam functia de update
+                const success = await updateCellMessage(attrs.row, attrs.col, newMsg);
+                
+                if (success) {
+                    // Update local
+                    selectedFeature.attributes.msg = newMsg;
+                    
+                    // Update vizual fortat
+                    myPopup.content = `
+                        <b>Status:</b> Unlocked <br>
+                        <b>Time:</b> ${attrs.time} <br>
+                        <b>Note:</b> ${newMsg}
+                    `;
+                }
+            }
+        }
+    });
+
+    // 4. Initializam VIEW-ul si ii dam popup-ul nostru
     const view = new MapView({
       container: mapDiv.current,
       map: map,
       center: [HARDCODED_LNG, HARDCODED_LAT], 
-      zoom: 14 
+      zoom: 14,
+      popup: myPopup // <--- Aici folosim popup-ul configurat mai sus
     });
     
     view.ui.move("zoom", "top-right");
     viewRef.current = view;
 
+    // --- Layerele standard ---
     const gLayer = new GraphicsLayer();
     map.add(gLayer);
     gridLayerRef.current = gLayer;
@@ -333,7 +407,14 @@ function GameMap() {
         updateUserMarker(lat, lng); 
         explorePosition(lat, lng); 
     });
+
+    // Cleanup
+    return () => {
+        if (actionHandle) actionHandle.remove(); // Scoatem listener-ul
+        if (view) view.destroy();
+    };
     
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridId]); 
 
   return (
