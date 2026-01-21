@@ -6,10 +6,14 @@ import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import Graphic from "@arcgis/core/Graphic";
 import Login from './Login';
 import Register from './Register';
-import Menu from './Menu'; // Ensure this matches your file name
+import Menu from './Menu'; 
 import './App.css';
 
-// --- STYLES ---
+// --- CONSTANTS ---
+// We use the same coordinates as the Menu to ensure alignment
+const HARDCODED_LAT = 44.4363421207524;
+const HARDCODED_LNG = 26.047860301820446;
+
 const styles = {
     notification: {
         position: 'absolute',
@@ -49,7 +53,7 @@ function GameMap() {
   const userLayerRef = useRef(null);
   const gridMetadataRef = useRef(null);
 
-  const { gridId } = useParams(); // <--- GET ID FROM URL
+  const { gridId } = useParams(); 
   const [notification, setNotification] = useState(null);
   const userId = localStorage.getItem('user_id'); 
   const navigate = useNavigate();
@@ -134,7 +138,6 @@ function GameMap() {
 
   const explorePosition = async (lat, lng) => {
       try {
-          // --- CHANGED: Send grid_id so backend knows which grid to update ---
           const res = await fetch('http://127.0.0.1:5000/api/explore', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
@@ -142,7 +145,7 @@ function GameMap() {
                   lat, 
                   lng, 
                   user_id: userId,
-                  grid_id: gridId // <--- CRITICAL UPDATE
+                  grid_id: gridId 
               })
           });
           const data = await res.json();
@@ -168,7 +171,6 @@ function GameMap() {
 
   const loadUserGrid = async () => {
       try {
-          // --- CHANGED: Fetch specific grid data using URL param ---
           const res = await fetch(`http://127.0.0.1:5000/api/grid_data/${gridId}`);
           if (!res.ok) throw new Error("Grid not found");
 
@@ -185,15 +187,10 @@ function GameMap() {
 
               gridLayerRef.current.removeAll(); 
               
-              if(viewRef.current) {
-                  viewRef.current.when(() => {
-                      viewRef.current.goTo({ center: [data.center_lng, data.center_lat], zoom: 15 })
-                        .catch(err => { if (err.name !== "AbortError") console.log(err); });
-                  });
-              }
-
+              // Draw Grid Outline
               drawGridOutline(data.center_lat, data.center_lng, data.dimension, data.cell_size);
 
+              // Draw Already Unlocked Cells
               const graphics = data.unlocked_cells.map(cell => 
                   createCellGraphic(cell.row, cell.col, data.center_lat, data.center_lng, data.cell_size)
               );
@@ -205,23 +202,36 @@ function GameMap() {
       }
   };
 
+  const updateUserMarker = (lat, lng) => {
+    if(userLayerRef.current) {
+        userLayerRef.current.removeAll(); 
+        const point = { type: "point", longitude: lng, latitude: lat };
+        const markerSymbol = {
+            type: "simple-marker",
+            color: [0, 119, 255], 
+            outline: { color: [255, 255, 255], width: 2 }
+        };
+        userLayerRef.current.add(new Graphic({ geometry: point, symbol: markerSymbol }));
+    }
+  };
+
   useEffect(() => {
     if (!mapDiv.current) return;
 
-    // Initialize Map
+    // 1. Initialize Map centered at HARDCODED location
     const map = new Map({ basemap: "dark-gray-vector" });
     const view = new MapView({
       container: mapDiv.current,
       map: map,
-      center: [26.1025, 44.4268], 
+      center: [HARDCODED_LNG, HARDCODED_LAT], // Start camera here
       zoom: 15
     });
-
+    
+    // Zoom buttons top-right
     view.ui.move("zoom", "top-right");
 
     viewRef.current = view;
 
-    // Layers
     const gLayer = new GraphicsLayer();
     map.add(gLayer);
     gridLayerRef.current = gLayer;
@@ -230,56 +240,41 @@ function GameMap() {
     map.add(uLayer);
     userLayerRef.current = uLayer;
 
-    // Load grid data from server
+    // Load grid data
     loadUserGrid();
 
-    // 1. CLICK LISTENER (For testing/teleporting)
+    // --- 2. SPOOF THE USER LOCATION ---
+    // Instead of waiting for GPS, we immediately place the user 
+    // at the hardcoded coordinates.
+    view.when(() => {
+        console.log("📍 Spoofing User Location to:", HARDCODED_LAT, HARDCODED_LNG);
+        
+        // A. Draw the blue dot
+        updateUserMarker(HARDCODED_LAT, HARDCODED_LNG);
+        
+        // B. Check the server to unlock the cell immediately
+        explorePosition(HARDCODED_LAT, HARDCODED_LNG);
+    });
+
+    // --- 3. CLICK TO TELEPORT (Development Mode) ---
+    // This lets you simulate walking by clicking around
     view.on("click", (event) => {
         const lat = event.mapPoint.latitude;
         const lng = event.mapPoint.longitude;
 
-        updateUserMarker(lat, lng); // Helper function to draw the dot
-        explorePosition(lat, lng);  // Check server for unlock
+        updateUserMarker(lat, lng); 
+        explorePosition(lat, lng); 
     });
 
-    // 2. GPS WATCHER (Real movement)
-    if ("geolocation" in navigator) {
-        const watcher = navigator.geolocation.watchPosition(
-            (position) => {
-                const { latitude, longitude } = position.coords;
-                
-                // Draw the user on the map
-                updateUserMarker(latitude, longitude);
-
-                // Check if we unlocked a cell
-                // (This fires on the very first position and every update)
-                explorePosition(latitude, longitude);
-            },
-            (err) => console.log("GPS Error:", err),
-            { 
-                enableHighAccuracy: true, 
-                maximumAge: 0, 
-                timeout: 5000 
-            }
-        );
-        return () => navigator.geolocation.clearWatch(watcher);
+    // --- 4. REAL GPS DISABLED FOR THIS TEST ---
+    /* if ("geolocation" in navigator) {
+        const watcher = navigator.geolocation.watchPosition(...) 
+        // Code commented out to prevent real GPS from overriding our spoof
     }
+    */
+    
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridId]); // Re-run if we switch grids
-
-  // Helper to keep code clean
-  const updateUserMarker = (lat, lng) => {
-      if(userLayerRef.current) {
-          userLayerRef.current.removeAll(); 
-          const point = { type: "point", longitude: lng, latitude: lat };
-          const markerSymbol = {
-              type: "simple-marker",
-              color: [0, 119, 255], // Blue dot for user
-              outline: { color: [255, 255, 255], width: 2 }
-          };
-          userLayerRef.current.add(new Graphic({ geometry: point, symbol: markerSymbol }));
-      }
-  };
+  }, [gridId]); 
 
   return (
     <div style={{ height: "100vh", width: "100%", position: "relative" }}>
@@ -290,7 +285,6 @@ function GameMap() {
           </div>
       )}
 
-      {/* Back to Menu Button */}
       <button style={styles.backBtn} onClick={() => navigate('/menu')}>
           ⬅ Back to Menu
       </button>
@@ -307,7 +301,6 @@ function App() {
         <Route path="/" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/menu" element={<Menu />} />
-        {/* The Route below captures the ID from URL */}
         <Route path="/map/:gridId" element={<GameMap />} />
       </Routes>
     </Router>

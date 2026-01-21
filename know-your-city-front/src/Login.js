@@ -17,10 +17,14 @@ function Login() {
       
       const data = await response.json();
       if (response.ok) {
-        // --- FIX: Salvăm și user_id, nu doar tokenul ---
+        // --- FIX: Salvam token, user_id, SI statusul de admin ---
         localStorage.setItem('token', data.token);
-        localStorage.setItem('user_id', data.user_id); 
-        // ----------------------------------------------
+        localStorage.setItem('user_id', data.user_id);
+        
+        // Convertim boolean-ul primit in string pentru localStorage
+        localStorage.setItem('is_admin', data.is_admin); 
+        // -------------------------------------------------------
+        
         navigate('/menu');
       } else {
         alert("Eroare: " + data.message);
